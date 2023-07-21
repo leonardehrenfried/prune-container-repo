@@ -61,79 +61,80 @@ def get_tags(token, repo):
     tags.extend(json['results'])
   return tags
 
+def prune():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('-u', '--user',
+                      required=True,
+                      help='The user to log into the service'
+                      )
+
+  parser.add_argument('-r', '--repo',
+                      required=True,
+                      help='The repository to check for images to delete'
+                      )
+
+  parser.add_argument('-d', '--days',
+                      required=False,
+                      default=180,
+                      type=int,
+                      help='How many days an images can stay without pull before it is deleted'
+                      )
+
+  parser.add_argument('-a', '--activate',
+                      action='store_true',
+                      help='Do the actual deletion rather than just a dry run'
+                      )
+
+  parser.add_argument('--keep-semver',
+                      required=False,
+                      default=False,
+                      type=bool,
+                      help='Should tags that are a sematic version (MAJOR.MINOR.PATCH) also be deleted or kept'
+                      )
+
+  args = parser.parse_args()
+
+  pw = os.environ["CONTAINER_REGISTRY_PASSWORD"]
+  repo = args.repo
+  user = args.user
+  days = args.days
+
+  token = get_token(args.user, pw)
+
+  tags = get_tags(token, repo)
+  tags_to_delete = []
+
+  table = [["Tag", "Last pushed", "Last pulled", "Last activity (days ago)", "To be deleted"]]
+  for tag in tags:
+    last_pushed = tag['tag_last_pushed']
+    last_pulled = tag['tag_last_pulled']
+
+    delete = should_delete(last_pulled, last_pushed, days)
+    age = tag_age(last_pulled, last_pushed)
+    row = [tag['name'], last_pushed, last_pulled, age, delete]
+    table.append(row)
+    if delete:
+      tags_to_delete.append(tag['name'])
+
+  print("")
+  print(f"Checking repo {repo} on {DOCKERHUB_BASE} for tags that haven't been pulled in the last {days} days")
+  print("")
+  print(tabulate(table, headers="firstrow"))
+
+  if args.activate:
+
+    for tag in tags_to_delete:
+
+      url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/{tag}"
+      print(f"Deleting tag {tag}")
+      resp = requests.delete(url, headers=headers(token))
+
+      if resp.status_code != 204:
+        print(resp)
+        raise "error"
+
+  else:
+    print("Not deleting anything. Use --activate to force actual deletion.")
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-u', '--user',
-                    required=True,
-                    help='The user to log into the service'
-                  )
-
-    parser.add_argument('-r', '--repo',
-                    required=True,
-                    help='The repository to check for images to delete'
-                  )
-
-    parser.add_argument('-d', '--days',
-                        required=False,
-                        default=180,
-                        type=int,
-                        help='How many days an images can stay without pull before it is deleted'
-                   )
-
-    parser.add_argument('-a', '--activate',
-                    action='store_true',
-                    help='Do the actual deletion rather than just a dry run'
-                  )
-
-    parser.add_argument('--keep-semver',
-                    required=False,
-                    default=False,
-                    type=bool,
-                    help='Should tags that are a sematic version (MAJOR.MINOR.PATCH) also be deleted or kept'
-                    )
-
-    args = parser.parse_args()
-
-    pw = os.environ["CONTAINER_REGISTRY_PASSWORD"]
-    repo = args.repo
-    user = args.user
-    days = args.days
-
-    token = get_token(args.user, pw)
-
-    tags = get_tags(token, repo)
-    tags_to_delete = []
-
-    table = [["Tag", "Last pushed", "Last pulled", "Last activity (days ago)", "To be deleted"]]
-    for tag in tags:
-        last_pushed = tag['tag_last_pushed']
-        last_pulled = tag['tag_last_pulled']
-
-        delete = should_delete(last_pulled, last_pushed, days)
-        age = tag_age(last_pulled, last_pushed)
-        row = [tag['name'], last_pushed, last_pulled, age, delete]
-        table.append(row)
-        if delete:
-          tags_to_delete.append(tag['name'])
-
-    print("")
-    print(f"Checking repo {repo} on {DOCKERHUB_BASE} for tags that haven't been pulled in the last {days} days")
-    print("")
-    print(tabulate(table, headers="firstrow"))
-
-    if args.activate:
-
-      for tag in tags_to_delete:
-
-        url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/{tag}"
-        print(f"Deleting tag {tag}")
-        resp = requests.delete(url, headers=headers(token))
-
-        if resp.status_code != 204:
-          print(resp)
-          raise "error"
-
-    else:
-      print("Not deleting anything. Use --activate to force actual deletion.")
+    prune()
