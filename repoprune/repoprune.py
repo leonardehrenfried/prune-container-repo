@@ -1,28 +1,43 @@
+import sys
+
 import requests
+import argparse
 import os
 from _datetime import datetime, timezone
 from tabulate import tabulate
 from dateutil.parser import parse
 
 DOCKERHUB_BASE = "https://hub.docker.com"
-MAX_UNPULLED_DAYS= 180
-
 
 def headers(token):
   return {
     "Authorization": f"JWT {token}"
   }
 
-def should_delete(last_pulled):
+def should_delete(last_pulled, last_pushed, max_days):
     if last_pulled is not None:
-      time = parse(last_pulled)
-      today = datetime.now(timezone.utc)
-      duration = today - time
-      days = duration.days
-      return days > MAX_UNPULLED_DAYS
+      age = tag_age(last_pulled, last_pushed)
+      return age > max_days
     else:
       # was never pulled
       return True
+
+
+def tag_age(last_pulled, last_pushed):
+  last_pushed_days = days_since(parse(last_pushed))
+  if last_pulled == None:
+    return last_pushed_days
+  else:
+    last_pulled_days = days_since(parse(last_pulled))
+    return max(last_pulled_days, last_pushed_days)
+
+
+def days_since(time):
+  today = datetime.now(timezone.utc)
+  duration = today - time
+  days = duration.days
+  return days
+
 
 def get_token(user, password):
   print(f"Getting token for user '{user}'")
@@ -37,28 +52,76 @@ def get_token(user, password):
   return resp.json()["token"]
 
 
+def get_tags(token, repo):
+  url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/?page_size=100"
+  resp = requests.get(url, headers=headers(token))
+  json = resp.json()
+  tags = json['results']
+
+  while json.get('next') is not None:
+    next = json['next']
+    resp = requests.get(next, headers=headers(token))
+    json = resp.json()
+    tags.extend(json['results'])
+  return tags
+
+
 if __name__ == "__main__":
-    user = os.environ["CONTAINER_REGISTRY_USER"]
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-u', '--user',
+                    required=True,
+                    help='The user to log into the service'
+                  )
+
+    parser.add_argument('-r', '--repo',
+                    required=True,
+                    help='The repository to check for images to delete'
+                  )
+
+    parser.add_argument('-d', '--days',
+                        required=False,
+                        default=180,
+                        type=int,
+                        help='How many days an images can stay without pull before it is deleted'
+                   )
+
+    args = parser.parse_args()
+
     pw = os.environ["CONTAINER_REGISTRY_PASSWORD"]
-    repo = "opentripplanner"
+    repo = args.repo
+    user = args.user
+    days = args.days
 
-    token = get_token(user, pw)
+    token = get_token(args.user, pw)
 
-    url = f"{DOCKERHUB_BASE}/v2/repositories/{user}/{repo}/tags/?page_size=10000"
+    tags = get_tags(token, repo)
+    tags_to_delete = []
 
-    resp = requests.get(url, headers=headers(token))
-
-    tags = resp.json()['results']
-
-    table = [["Tag", "Last pulled", "To be deleted"]]
+    table = [["Tag", "Last pushed", "Last pulled", "Last activity (days ago)", "To be deleted"]]
     for tag in tags:
+        last_pushed = tag['tag_last_pushed']
         last_pulled = tag['tag_last_pulled']
 
-        row = [tag['name'], last_pulled, should_delete(last_pulled)]
+        delete = should_delete(last_pulled, last_pushed, days)
+        age = tag_age(last_pulled, last_pushed)
+        row = [tag['name'], last_pushed, last_pulled, age, delete]
         table.append(row)
-
+        if delete:
+          tags_to_delete.append(tag['name'])
 
     print("")
-    print(f"Tags for repo {user}/{repo} on {DOCKERHUB_BASE}")
+    print(f"Checking repo {repo} on {DOCKERHUB_BASE} for tags that haven't been pulled in the last {days} days")
     print("")
     print(tabulate(table, headers="firstrow"))
+
+    for tag in tags_to_delete:
+
+      url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/{tag}"
+      print(f"Deleting tag {tag}")
+      print(url)
+      resp = requests.delete(url, headers=headers(token))
+
+      if resp.status_code != 204:
+        print(resp)
+        raise resp
