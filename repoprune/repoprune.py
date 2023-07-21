@@ -15,21 +15,17 @@ def headers(token):
   }
 
 def should_delete(last_pulled, last_pushed, max_days):
-    if last_pulled is not None:
-      age = tag_age(last_pulled, last_pushed)
-      return age > max_days
-    else:
-      # was never pulled
-      return True
+    age = tag_age(last_pulled, last_pushed)
+    return age > max_days
 
 
 def tag_age(last_pulled, last_pushed):
   last_pushed_days = days_since(parse(last_pushed))
-  if last_pulled == None:
+  if last_pulled is None:
     return last_pushed_days
   else:
     last_pulled_days = days_since(parse(last_pulled))
-    return max(last_pulled_days, last_pushed_days)
+    return min(last_pulled_days, last_pushed_days)
 
 
 def days_since(time):
@@ -86,6 +82,18 @@ if __name__ == "__main__":
                         help='How many days an images can stay without pull before it is deleted'
                    )
 
+    parser.add_argument('-a', '--activate',
+                    action='store_true',
+                    help='Do the actual deletion rather than just a dry run'
+                  )
+
+    parser.add_argument('--keep-semver',
+                    required=False,
+                    default=False,
+                    type=bool,
+                    help='Should tags that are a sematic version (MAJOR.MINOR.PATCH) also be deleted or kept'
+                    )
+
     args = parser.parse_args()
 
     pw = os.environ["CONTAINER_REGISTRY_PASSWORD"]
@@ -115,13 +123,17 @@ if __name__ == "__main__":
     print("")
     print(tabulate(table, headers="firstrow"))
 
-    for tag in tags_to_delete:
+    if args.activate:
 
-      url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/{tag}"
-      print(f"Deleting tag {tag}")
-      print(url)
-      resp = requests.delete(url, headers=headers(token))
+      for tag in tags_to_delete:
 
-      if resp.status_code != 204:
-        print(resp)
-        raise resp
+        url = f"{DOCKERHUB_BASE}/v2/repositories/{repo}/tags/{tag}"
+        print(f"Deleting tag {tag}")
+        resp = requests.delete(url, headers=headers(token))
+
+        if resp.status_code != 204:
+          print(resp)
+          raise "error"
+
+    else:
+      print("Not deleting anything. Use --activate to force actual deletion.")
