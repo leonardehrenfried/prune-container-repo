@@ -6,8 +6,10 @@ import os
 from _datetime import datetime, timezone
 from tabulate import tabulate
 from dateutil.parser import parse
+import re
 
 DOCKERHUB_BASE = "https://hub.docker.com"
+SEMVER_PATTERN = re.compile(r"^v?\d+\.\d+\.\d+$")
 
 def headers(token):
   return {
@@ -61,6 +63,10 @@ def get_tags(token, repo):
     tags.extend(json['results'])
   return tags
 
+
+def is_semver(tag):
+  return bool(SEMVER_PATTERN.match(tag))
+
 def prune():
   parser = argparse.ArgumentParser()
   parser.add_argument('-u', '--user',
@@ -87,7 +93,7 @@ def prune():
 
   parser.add_argument('--keep-semver',
                       required=False,
-                      default=False,
+                      default=True,
                       type=bool,
                       help='Should tags that are a sematic version (MAJOR.MINOR.PATCH) also be deleted or kept'
                       )
@@ -96,7 +102,6 @@ def prune():
 
   pw = os.environ["CONTAINER_REGISTRY_PASSWORD"]
   repo = args.repo
-  user = args.user
   days = args.days
 
   token = get_token(args.user, pw)
@@ -110,6 +115,9 @@ def prune():
     last_pulled = tag['tag_last_pulled']
 
     delete = should_delete(last_pulled, last_pushed, days)
+    if(args.keep_semver):
+      delete = not is_semver(tag['name'])
+
     age = tag_age(last_pulled, last_pushed)
     row = [tag['name'], last_pushed, last_pulled, age, delete]
     table.append(row)
