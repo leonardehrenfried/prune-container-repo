@@ -1,5 +1,7 @@
+clean:
+	rm -rf dist
 build:
 	python3 -m build
 
-publish:
-	python3 -m twine upload --repository prune-container-repo dist/*
+publish: clean build
+	python3 -m twine upload dist/*
