@@ -116,7 +116,7 @@ def prune():
 
     delete = should_delete(last_pulled, last_pushed, days)
     if(args.keep_semver):
-      delete = not is_semver(tag['name'])
+      delete = delete and not is_semver(tag['name'])
 
     age = tag_age(last_pulled, last_pushed)
     row = [tag['name'], last_pushed, last_pulled, age, delete]
