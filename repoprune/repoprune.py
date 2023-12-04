@@ -91,10 +91,9 @@ def prune():
                       help='Do the actual deletion rather than just a dry run'
                       )
 
-  parser.add_argument('--keep-semver',
-                      required=False,
+  parser.add_argument("-k" , '--keep-semver',
+                      action='store_true',
                       default=True,
-                      type=bool,
                       help='Should tags that are a sematic version (MAJOR.MINOR.PATCH) also be deleted or kept'
                       )
 
@@ -115,7 +114,7 @@ def prune():
     last_pulled = tag['tag_last_pulled']
 
     delete = should_delete(last_pulled, last_pushed, days)
-    if(args.keep_semver):
+    if args.keep_semver:
       delete = delete and not is_semver(tag['name'])
 
     age = tag_age(last_pulled, last_pushed)
